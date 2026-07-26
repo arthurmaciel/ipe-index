@@ -1,0 +1,48 @@
+name: admission
+
+# Gate a proposed package version before the index accepts it. Runs on any PR
+# that touches packages/**. A version merges only when this is green on every
+# platform Ipê ships a binary for; a red result — or a sandbox that cannot
+# establish on any platform — rejects the entry (never a warning).
+#
+# INTEGRATION POINT: the audit + per-platform sandbox steps below invoke the
+# tooling that lives in the language repo (arthurmaciel/ipe-lang):
+#   - `ipe package audit` — the universal Tier-1 gate + native Tier-2 checks.
+#   - scripts/admission/jail-<platform>.sh + admission-sandbox.yml — the
+#     off-the-shelf per-platform sandbox that builds and probes native source.
+# Until `ipe` is installed here, these steps are the documented skeleton of the
+# authoritative gate; they must be wired to fail-closed before this index serves
+# native packages.
+
+on:
+  pull_request:
+    paths:
+      - 'packages/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: audit (Tier-1 universal)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Identify the changed entries
+        run: |
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- packages/ | tee changed.txt
+      # INTEGRATION: install ipe, then for each changed packages/<name>.toml run
+      #   `ipe package audit <name>` (Tier-1: capability consistency, enforced
+      #   semver vs the prior published version, supply chain, provenance scan).
+      - name: Audit (skeleton)
+        run: |
+          echo "TODO: install ipe and run 'ipe package audit' on each changed entry."
+          echo "This job must fail closed on any Tier-1 violation before it gates real entries."
+          exit 0
+
+  # INTEGRATION: a native-bearing package (declared native-ffi) additionally
+  # fans out across the platform matrix, building + probing its source inside the
+  # off-the-shelf jail per platform (Linux/macOS/Windows/FreeBSD). See
+  # arthurmaciel/ipe-lang .github/workflows/admission-sandbox.yml.
