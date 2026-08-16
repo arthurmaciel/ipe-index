@@ -16,6 +16,7 @@ on:
   pull_request:
     paths:
       - 'packages/**'
+      - '.github/workflows/admission.yml'
   workflow_dispatch: {}
 
 permissions:
