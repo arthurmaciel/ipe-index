@@ -87,7 +87,7 @@ jobs:
       - name: Assert the toolchain is the pinned version
         run: |
           set -euo pipefail
-          got="$(ipe --version | rg -o '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          got="$(ipe --version | awk 'NF{print $NF; exit}')"
           want="${IPE_VERSION#ipe-v}"
           test "$got" = "$want" || { echo "toolchain drift: got '$got', want '$want'"; exit 1; }
       - name: Materialize the baseline index (target branch)
@@ -132,7 +132,7 @@ jobs:
       - name: Assert the toolchain is the pinned version
         run: |
           set -euo pipefail
-          got="$(ipe --version | rg -o '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+          got="$(ipe --version | awk 'NF{print $NF; exit}')"
           want="${IPE_VERSION#ipe-v}"
           test "$got" = "$want" || { echo "toolchain drift: got '$got', want '$want'"; exit 1; }
       - name: Materialize the baseline index (target branch)
