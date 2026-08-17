@@ -90,6 +90,14 @@ jobs:
           got="$(ipe --version | awk 'NF{print $NF; exit}')"
           want="${IPE_VERSION#ipe-v}"
           test "$got" = "$want" || { echo "toolchain drift: got '$got', want '$want'"; exit 1; }
+      - name: Install the native Tier-2 sandbox primitives
+        run: |
+          set -euo pipefail
+          # The native jail confines the FFI build with bubblewrap + prlimit; a
+          # native package fails closed (refuses to certify) without them.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bubblewrap util-linux
+          command -v bwrap && command -v prlimit
       - name: Materialize the baseline index (target branch)
         run: git worktree add /tmp/baseline-index "origin/${{ github.base_ref }}"
       - name: Audit each changed entry (fail closed)
