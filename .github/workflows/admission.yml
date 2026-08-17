@@ -27,7 +27,7 @@ permissions:
 # then a native-bearing entry fails closed (the safe outcome — the index admits
 # no native code whose build-time reach has not been confined and proven).
 env:
-  IPE_VERSION: ipe-v0.1.54
+  IPE_VERSION: ipe-v0.1.55
 
 jobs:
   changed:
