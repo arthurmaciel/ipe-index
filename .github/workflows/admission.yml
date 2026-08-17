@@ -1,48 +1,189 @@
 name: admission
 
-# Gate a proposed package version before the index accepts it. Runs on any PR
-# that touches packages/**. A version merges only when this is green on every
-# platform Ipê ships a binary for; a red result — or a sandbox that cannot
-# establish on any platform — rejects the entry (never a warning).
+# The authoritative receiving gate. A proposed package version merges into the
+# index only when `ipe package audit-entry` certifies it: schema, fetch +
+# sha256 integrity-verify against the pinned source, and the full Tier-1 (+ Tier-2
+# native) audit for every new version, run against the baseline index as it
+# exists on the target branch. A red result — or a sandbox that cannot establish
+# on a platform a native package targets — rejects the entry. Never a warning,
+# never a silent skip: absent proof the entry is safe, the merge is blocked.
 #
-# INTEGRATION POINT: the audit + per-platform sandbox steps below invoke the
-# tooling that lives in the language repo (arthurmaciel/ipe-lang):
-#   - `ipe package audit` — the universal Tier-1 gate + native Tier-2 checks.
-#   - scripts/admission/jail-<platform>.sh + admission-sandbox.yml — the
-#     off-the-shelf per-platform sandbox that builds and probes native source.
-# Until `ipe` is installed here, these steps are the documented skeleton of the
-# authoritative gate; they must be wired to fail-closed before this index serves
-# native packages.
+# The gate runs the same `ipe` binary an author runs locally, pinned to an exact
+# release and integrity-verified on download, so the wall the index enforces is
+# byte-identical to the one `ipe package publish` previews.
 
 on:
   pull_request:
     paths:
       - 'packages/**'
+      - '.github/workflows/admission.yml'
   workflow_dispatch: {}
 
 permissions:
   contents: read
 
+# The single pinned toolchain version. Advancing native-package certification is
+# a one-line bump here to a release carrying the Tier-2 reachability fix; until
+# then a native-bearing entry fails closed (the safe outcome — the index admits
+# no native code whose build-time reach has not been confined and proven).
+env:
+  IPE_VERSION: v0.1.53
+
 jobs:
+  changed:
+    name: identify changed entries
+    runs-on: ubuntu-latest
+    outputs:
+      entries: ${{ steps.scan.outputs.entries }}
+      any: ${{ steps.scan.outputs.any }}
+      any_native: ${{ steps.scan.outputs.any_native }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: scan
+        name: Diff packages/ against the target branch
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.base_ref }}" --depth=1
+          base="origin/${{ github.base_ref }}"
+          changed="$(git diff --name-only "$base"...HEAD -- 'packages/*.toml' || true)"
+          echo "changed entries:"; echo "$changed"
+          any=false
+          any_native=false
+          for f in $changed; do
+            any=true
+            # A deleted entry is absent from the working tree. Deleting a published
+            # entry (or any version within it) is an immutability violation; the
+            # audit job rejects it. A present entry declaring native-ffi trips the
+            # per-platform native confinement matrix.
+            if [ -f "$f" ] && grep -q 'native-ffi' "$f"; then
+              any_native=true
+            fi
+          done
+          {
+            echo "entries<<EOF"
+            echo "$changed"
+            echo "EOF"
+            echo "any=$any"
+            echo "any_native=$any_native"
+          } >> "$GITHUB_OUTPUT"
+
   audit:
-    name: audit (Tier-1 universal)
+    name: audit (Tier-1 universal + Tier-2 Linux)
+    needs: changed
+    if: needs.changed.outputs.any == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - name: Identify the changed entries
+        with:
+          fetch-depth: 0
+      - name: Install the pinned ipe toolchain
         run: |
-          git fetch origin "${{ github.base_ref }}" --depth=1
-          git diff --name-only "origin/${{ github.base_ref }}"...HEAD -- packages/ | tee changed.txt
-      # INTEGRATION: install ipe, then for each changed packages/<name>.toml run
-      #   `ipe package audit <name>` (Tier-1: capability consistency, enforced
-      #   semver vs the prior published version, supply chain, provenance scan).
-      - name: Audit (skeleton)
+          set -euo pipefail
+          curl -fsSL "https://github.com/arthurmaciel/ipe-lang/releases/download/${IPE_VERSION}/install.sh" \
+            | IPE_VERSION="${IPE_VERSION}" IPE_INSTALL_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Assert the toolchain is the pinned version
         run: |
-          echo "TODO: install ipe and run 'ipe package audit' on each changed entry."
-          echo "This job must fail closed on any Tier-1 violation before it gates real entries."
-          exit 0
+          set -euo pipefail
+          got="$(ipe --version | awk '{print $NF}')"
+          want="${IPE_VERSION#v}"
+          test "$got" = "$want" || { echo "toolchain drift: got $got, want $want"; exit 1; }
+      - name: Materialize the baseline index (target branch)
+        run: git worktree add /tmp/baseline-index "origin/${{ github.base_ref }}"
+      - name: Audit each changed entry (fail closed)
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${{ needs.changed.outputs.entries }}" | while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            printf '::group::audit-entry %s\n' "$f"
+            if [ ! -f "$f" ]; then
+              echo "REJECTED: $f was deleted — a published index entry is immutable and must never be removed."
+              echo "$f" >> /tmp/failures
+            elif ipe package audit-entry "$f" --index /tmp/baseline-index; then
+              echo "CERTIFIED: $f"
+            else
+              echo "REJECTED: $f did not pass the receiving gate."
+              echo "$f" >> /tmp/failures
+            fi
+            echo '::endgroup::'
+          done
+          if [ -s /tmp/failures ]; then
+            echo "Rejected entries:"; cat /tmp/failures
+            exit 1
+          fi
 
-  # INTEGRATION: a native-bearing package (declared native-ffi) additionally
-  # fans out across the platform matrix, building + probing its source inside the
-  # off-the-shelf jail per platform (Linux/macOS/Windows/FreeBSD). See
-  # arthurmaciel/ipe-lang .github/workflows/admission-sandbox.yml.
+  audit-native-macos:
+    name: audit native (Tier-2 macOS confinement)
+    needs: changed
+    if: needs.changed.outputs.any_native == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Install the pinned ipe toolchain
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/arthurmaciel/ipe-lang/releases/download/${IPE_VERSION}/install.sh" \
+            | IPE_VERSION="${IPE_VERSION}" IPE_INSTALL_DIR="$HOME/.local/bin" sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Assert the toolchain is the pinned version
+        run: |
+          set -euo pipefail
+          got="$(ipe --version | awk '{print $NF}')"
+          want="${IPE_VERSION#v}"
+          test "$got" = "$want" || { echo "toolchain drift: got $got, want $want"; exit 1; }
+      - name: Materialize the baseline index (target branch)
+        run: git worktree add /tmp/baseline-index "origin/${{ github.base_ref }}"
+      - name: Re-audit each native-bearing entry under the macOS jail (fail closed)
+        run: |
+          set -euo pipefail
+          printf '%s\n' "${{ needs.changed.outputs.entries }}" | while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            [ -f "$f" ] || continue
+            grep -q 'native-ffi' "$f" || continue
+            printf '::group::audit-entry (macOS) %s\n' "$f"
+            if ipe package audit-entry "$f" --index /tmp/baseline-index; then
+              echo "CERTIFIED (macOS): $f"
+            else
+              echo "REJECTED (macOS): $f"
+              echo "$f" >> /tmp/failures
+            fi
+            echo '::endgroup::'
+          done
+          if [ -s /tmp/failures ]; then
+            echo "Rejected on macOS:"; cat /tmp/failures
+            exit 1
+          fi
+
+  # The single required status check. It succeeds only when every upstream job
+  # succeeded or was legitimately skipped (a pure-Ipê PR skips the native legs),
+  # and fails if any upstream job failed or was cancelled. Branch protection
+  # requires exactly this check, so a conditional native leg never leaves the
+  # gate hanging, yet a real rejection always blocks the merge.
+  #
+  # The Windows (Job Object + AppContainer) and FreeBSD (jail(8)) native legs are
+  # tracked in arthurmaciel/ipe-lang#292; this gate admits a native package only
+  # once every platform it targets is wired, and fails closed until then.
+  admission-gate:
+    name: admission gate
+    needs: [changed, audit, audit-native-macos]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every audit leg to have passed or cleanly skipped
+        run: |
+          set -euo pipefail
+          for r in \
+            "changed=${{ needs.changed.result }}" \
+            "audit=${{ needs.audit.result }}" \
+            "audit-native-macos=${{ needs.audit-native-macos.result }}"; do
+            job="${r%%=*}"; res="${r#*=}"
+            case "$res" in
+              success|skipped) echo "ok: $job ($res)" ;;
+              *) echo "BLOCKED: $job = $res"; exit 1 ;;
+            esac
+          done
+          echo "admission gate: all audit legs passed or cleanly skipped."
