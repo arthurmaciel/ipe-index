@@ -1,0 +1,9 @@
+name = "crc32-checksum"
+publisher = "arthurmaciel"
+
+[[version]]
+version = "0.1.0"
+source = "https://github.com/arthurmaciel/crc32-checksum"
+rev = "f629aae01be42958f021f9c840a8681f7570a150"
+sha256 = "da06c07dd03de7c760cb0f378826ce9a33621464d8c9bcc8d1b27323042993a8"
+capabilities = ["native-ffi"]
