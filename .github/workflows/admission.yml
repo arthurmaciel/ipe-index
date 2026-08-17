@@ -27,7 +27,7 @@ permissions:
 # then a native-bearing entry fails closed (the safe outcome — the index admits
 # no native code whose build-time reach has not been confined and proven).
 env:
-  IPE_VERSION: v0.1.54
+  IPE_VERSION: ipe-v0.1.54
 
 jobs:
   changed:
@@ -88,7 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           got="$(ipe --version | awk '{print $NF}')"
-          want="${IPE_VERSION#v}"
+          want="${IPE_VERSION#ipe-v}"
           test "$got" = "$want" || { echo "toolchain drift: got $got, want $want"; exit 1; }
       - name: Materialize the baseline index (target branch)
         run: git worktree add /tmp/baseline-index "origin/${{ github.base_ref }}"
@@ -133,7 +133,7 @@ jobs:
         run: |
           set -euo pipefail
           got="$(ipe --version | awk '{print $NF}')"
-          want="${IPE_VERSION#v}"
+          want="${IPE_VERSION#ipe-v}"
           test "$got" = "$want" || { echo "toolchain drift: got $got, want $want"; exit 1; }
       - name: Materialize the baseline index (target branch)
         run: git worktree add /tmp/baseline-index "origin/${{ github.base_ref }}"
