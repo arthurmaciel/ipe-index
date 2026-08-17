@@ -1,0 +1,9 @@
+name = "list-extra"
+publisher = "arthurmaciel"
+
+[[version]]
+version = "0.1.0"
+source = "https://github.com/arthurmaciel/list-extra"
+rev = "c84e97d7b681022cff61caa3dc5400009fe613ea"
+sha256 = "432e0d4a88aca990ce404742fd187396eb872c6730b5efcbcd1fb088cb82585f"
+capabilities = []
