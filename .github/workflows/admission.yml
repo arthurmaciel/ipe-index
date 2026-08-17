@@ -87,9 +87,9 @@ jobs:
       - name: Assert the toolchain is the pinned version
         run: |
           set -euo pipefail
-          got="$(ipe --version | awk '{print $NF}')"
+          got="$(ipe --version | rg -o '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
           want="${IPE_VERSION#ipe-v}"
-          test "$got" = "$want" || { echo "toolchain drift: got $got, want $want"; exit 1; }
+          test "$got" = "$want" || { echo "toolchain drift: got '$got', want '$want'"; exit 1; }
       - name: Materialize the baseline index (target branch)
         run: git worktree add /tmp/baseline-index "origin/${{ github.base_ref }}"
       - name: Audit each changed entry (fail closed)
@@ -132,9 +132,9 @@ jobs:
       - name: Assert the toolchain is the pinned version
         run: |
           set -euo pipefail
-          got="$(ipe --version | awk '{print $NF}')"
+          got="$(ipe --version | rg -o '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
           want="${IPE_VERSION#ipe-v}"
-          test "$got" = "$want" || { echo "toolchain drift: got $got, want $want"; exit 1; }
+          test "$got" = "$want" || { echo "toolchain drift: got '$got', want '$want'"; exit 1; }
       - name: Materialize the baseline index (target branch)
         run: git worktree add /tmp/baseline-index "origin/${{ github.base_ref }}"
       - name: Re-audit each native-bearing entry under the macOS jail (fail closed)
